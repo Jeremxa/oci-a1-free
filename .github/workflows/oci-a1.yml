@@ -2,7 +2,7 @@ name: OCI A1 Free Auto-Retry
 
 on:
   schedule:
-    - cron: "*/15 * * * *"     # alle 15 Min (GitHub-Zeiten sind nur ungefähr)
+    - cron: "7,22,37,52 * * * *"     # alle 15 Min (GitHub-Zeiten sind nur ungefähr)
   workflow_dispatch: {}         # manueller "Run workflow"-Button
 
 permissions:
