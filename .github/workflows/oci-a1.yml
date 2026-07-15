@@ -1,0 +1,79 @@
+name: OCI A1 Free Auto-Retry
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"     # alle 15 Min (GitHub-Zeiten sind nur ungefähr)
+  workflow_dispatch: {}         # manueller "Run workflow"-Button
+
+permissions:
+  actions: write                # nötig, um den Cron nach Erfolg abzuschalten
+  contents: read
+
+concurrency:
+  group: oci-a1
+  cancel-in-progress: false
+
+jobs:
+  launch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: OCI CLI installieren
+        run: pip install oci-cli
+
+      - name: OCI-Konfiguration aus Secrets schreiben
+        env:
+          OCI_USER:        ${{ secrets.OCI_USER }}
+          OCI_TENANCY:     ${{ secrets.OCI_TENANCY }}
+          OCI_FINGERPRINT: ${{ secrets.OCI_FINGERPRINT }}
+          OCI_REGION:      ${{ secrets.OCI_REGION }}
+          OCI_KEY:         ${{ secrets.OCI_KEY_CONTENT }}
+        run: |
+          mkdir -p "$HOME/.oci"
+          printf '%s\n' "$OCI_KEY" > "$HOME/.oci/key.pem"
+          chmod 600 "$HOME/.oci/key.pem"
+          cat > "$HOME/.oci/config" <<EOF
+          [DEFAULT]
+          user=$OCI_USER
+          fingerprint=$OCI_FINGERPRINT
+          tenancy=$OCI_TENANCY
+          region=$OCI_REGION
+          key_file=$HOME/.oci/key.pem
+          EOF
+          chmod 600 "$HOME/.oci/config"
+          oci os ns get >/dev/null && echo "Auth OK"
+
+      - name: Launch-Versuch
+        id: launch
+        env:
+          COMPARTMENT_ID: ${{ secrets.OCI_TENANCY }}
+          SUBNET_ID:      ${{ secrets.OCI_SUBNET_ID }}
+          SSH_PUBKEY:     ${{ secrets.OCI_SSH_PUBKEY }}
+        run: bash ./launch.sh
+
+      - name: Cron nach Erfolg abschalten
+        if: steps.launch.outputs.launched == 'true' || steps.launch.outputs.launched == 'limit'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow disable "OCI A1 Free Auto-Retry" || true
+          echo "Workflow deaktiviert – Instanz vorhanden."
+
+      - name: Telegram-Benachrichtigung (optional)
+        if: steps.launch.outputs.launched == 'true'
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT:  ${{ secrets.TELEGRAM_CHAT_ID }}
+          OCID:     ${{ steps.launch.outputs.instance_ocid }}
+        run: |
+          [ -z "$TG_TOKEN" ] && { echo "kein Telegram-Token gesetzt, überspringe"; exit 0; }
+          curl -s "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TG_CHAT}" \
+            --data-urlencode "text=Oracle A1 Instanz erstellt. OCID: ${OCID}" >/dev/null
