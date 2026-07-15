@@ -50,6 +50,7 @@ for AD in "${ADS[@]}"; do
     printf "Versuch in %s mit %s OCPU / %s GB ... " "$AD" "$C" "$M"
 
     if oci compute instance launch \
+        --no-retry \
         --availability-domain "$AD" \
         --compartment-id "$COMPARTMENT_ID" \
         --shape "$SHAPE" \
